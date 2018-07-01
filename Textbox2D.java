@@ -3,8 +3,8 @@ package me.vxti.core.opengl.component.components.text_box;
 import me.vxti.core.opengl.component.Interactable;
 import me.vxti.core.opengl.font.CFontRenderer;
 import me.vxti.core.opengl.misc.DisplayManager;
-import me.vxti.core.opengl.misc.Gui;
-import me.vxti.core.util.action.Action;
+import me.vxti.core.opengl.misc.text_highlighting.ITextHighlighting;
+import me.vxti.core.opengl.misc.text_highlighting.TextParseResult;
 import me.vxti.core.util.math.Dimension;
 import me.vxti.core.util.math.MathHelper;
 import me.vxti.core.util.math.vector.vec2;
@@ -13,6 +13,7 @@ import org.lwjgl.Sys;
 import org.lwjgl.input.Keyboard;
 
 import java.awt.*;
+import java.awt.datatransfer.StringSelection;
 import java.util.*;
 import java.util.List;
 
@@ -66,7 +67,7 @@ public class Textbox2D extends Interactable {
 
     // The highlighting for the text, used in IDE's for example.
     private TextParseResult default_result = new TextParseResult(text_color, 1, false);
-    private TextHighlighting text_highlighting = (a, b, c) -> default_result;
+    private ITextHighlighting text_highlighting = (a, b, c) -> default_result;
 
     // The scrollbars on the side, for when the text overlaps the dimensions
     private ScrollListner horizontal, vertical;
@@ -85,7 +86,7 @@ public class Textbox2D extends Interactable {
         super(dimensions);
 
         setSelected(true);
-        setFont("Monospaced");
+        setFont("Courier New");
         showLineNumbers(false);
 
         String[] data = text.split("\n");
@@ -143,15 +144,66 @@ public class Textbox2D extends Interactable {
 
         if (is_selecting())
         {
-            rect(
-                    dimension.x + line_nr_offset + 5 + font.getStringWidth(lines.get(selection_start.ix).substring(0, selection_start.iy)) + horizontal.getScroll(),
 
-                    dimension.y + selection_start.ix * line_height() + vertical.getScroll(),
+            vec2 min = selection_start.ix > selection_end.ix ? selection_end : selection_start;
+            vec2 max = selection_start.ix > selection_end.ix ? selection_start : selection_end;
 
-                    dimension.x + line_nr_offset + 5 + font.getStringWidth(lines.get(selection_end.ix).substring(0, selection_end.iy)) + horizontal.getScroll(),
+            if (max.ix - min.ix> 1) {
 
-                    dimension.y + (selection_end.ix + 1) * line_height() + vertical.getScroll(),
-                    0x40366DBF);
+                // Rendering the line from L2R
+                rect(dimension.x + line_nr_offset + 5 + horizontal.getScroll() + font.getStringWidth(lines.get(min.ix).substring(0, min.iy)),
+                        dimension.y + min.ix * line_height() + vertical.getScroll(),
+                        dimension.x + dimension.w,
+                        dimension.y + (min.ix+1) * line_height() + vertical.getScroll(),
+                        0x40366DBF);
+
+                rect(dimension.x + line_nr_offset + 5,
+                        dimension.y + max.ix * line_height() + vertical.getScroll(),
+                        dimension.x + line_nr_offset + 5 + font.getStringWidth(lines.get(max.ix).substring(0, max.iy)) + horizontal.getScroll(),
+                        dimension.y + (max.ix+1) * line_height() + vertical.getScroll(),
+                        0x40366DBF);
+
+
+
+                // Rendering the lines inbetween
+                rect(dimension.x + line_nr_offset + 5 + horizontal.getScroll(),
+                        dimension.y + (min.ix+1)*line_height() + vertical.getScroll(),
+                        dimension.x + dimension.w,
+                        dimension.y + (max.ix)*line_height() + vertical.getScroll(),
+                        0x40366DBF);
+            }
+            else
+            {
+
+                if (max.ix - min.ix > 0)
+                {
+                    // Rendering the line from L2R
+                    rect(dimension.x + line_nr_offset + 5 + horizontal.getScroll() + font.getStringWidth(lines.get(min.ix).substring(0, min.iy)),
+                            dimension.y + min.ix * line_height() + vertical.getScroll(),
+                            dimension.x + dimension.w,
+                            dimension.y + (min.ix+1) * line_height() + vertical.getScroll(),
+                            0x40366DBF);
+
+                    rect(dimension.x + line_nr_offset + 5,
+                            dimension.y + max.ix * line_height() + vertical.getScroll(),
+                            dimension.x + line_nr_offset + 5 + font.getStringWidth(lines.get(max.ix).substring(0, max.iy)) + horizontal.getScroll(),
+                            dimension.y + (max.ix+1) * line_height() + vertical.getScroll(),
+                            0x40366DBF);
+                }
+                else
+                {
+                    rect(
+                            dimension.x + line_nr_offset + 5 + font.getStringWidth(lines.get(min.ix).substring(0, min.iy)) + horizontal.getScroll(),
+
+                            dimension.y + min.ix * line_height() + vertical.getScroll(),
+
+                            dimension.x + line_nr_offset + 5 + font.getStringWidth(lines.get(max.ix).substring(0, max.iy)) + horizontal.getScroll(),
+
+                            dimension.y + (max.ix + 1) * line_height() + vertical.getScroll(),
+                            0x40366DBF);
+                }
+
+            }
         }
 
 
@@ -294,6 +346,13 @@ public class Textbox2D extends Interactable {
                 break;
 
             case DEL_LEFT:
+
+                if (is_selecting())
+                {
+                    delete_selection();
+                    return;
+                }
+
                 String line = lines.get(line_position);
                 if (line_pointer == 0)
                 {
@@ -334,6 +393,13 @@ public class Textbox2D extends Interactable {
                 break;
 
             case DEL_RIGHT:
+
+                if (is_selecting())
+                {
+                    delete_selection();
+                    return;
+                }
+
                 String line2 = lines.get(line_position);
 
                 if (line_pointer == line2.length())
@@ -387,6 +453,12 @@ public class Textbox2D extends Interactable {
         }
         else
         {
+
+            // This is where the magic happens.
+
+            if (is_selecting())
+                delete_selection();
+
             String line = lines.get(line_position);
             String add = line.substring(0, line_pointer) + chars.toString() + line.substring(line_pointer);
             lines.set(line_position, add);
@@ -395,14 +467,24 @@ public class Textbox2D extends Interactable {
 
     }
 
-    // Retrieves the line height.
+    /**
+     * Returns the height of the lines.
+     */
     private int line_height() { return (int) (font.getHeight() * 1.1F); }
 
-    // Whether or not you're selecting text
+    /**
+     * Returns whether or not there's text selected.
+     */
     private boolean is_selecting() { return selection_start.x > -1 && selection_start.y > -1 && selection_end.x > -1 && selection_end.y > -1 && selection_start.compare(selection_end) != 0; }
 
+    /**
+     * Stops selecting text.
+     */
     private void stop_selecting() { this.selection_start.translate(-1, -1); this.selection_end.translate(-1, -1); }
 
+    /**
+     * Moves the selection from line l_nr to the current nr, and line_pos from l_pos to the current position.
+     */
     private void select(int l_nr, int l_pos) {
         if (shiftDown())
         {
@@ -420,6 +502,70 @@ public class Textbox2D extends Interactable {
         {
             stop_selecting();
         }
+    }
+
+    private String get_selection() {
+        vec2 min = selection_start.ix > selection_end.ix ? selection_end : selection_start;
+        vec2 max = selection_start.ix > selection_end.ix ? selection_start : selection_end;
+
+        StringBuilder _lines = new StringBuilder();
+
+        if (max.ix - min.ix > 1)
+        {
+            _lines.append(lines.get(min.ix).substring(0, min.iy) + "\n");
+
+            for (int line = min.ix + 1; line < max.ix; line++) {
+                _lines.append(lines.get(line) + "\n");
+            }
+
+            _lines.append(lines.get(max.ix).substring(max.iy));
+        }
+        else if (max.ix - min.ix > 0)
+        {
+            _lines.append(lines.get(min.ix).substring(0, min.iy) + "\n");
+            _lines.append(lines.get(max.ix).substring(max.iy));
+        }
+        else
+        {
+            _lines.append(lines.get(min.ix).substring(0, min.iy) + lines.get(min.ix).substring(max.iy));
+        }
+        return _lines.toString();
+    }
+
+    /**
+     * Deletes the current selection.
+     */
+    private void delete_selection() {
+        vec2 min = selection_start.ix > selection_end.ix ? selection_end : selection_start;
+        vec2 max = selection_start.ix > selection_end.ix ? selection_start : selection_end;
+
+        if (max.ix - min.ix > 1)
+        {
+            lines.set(min.ix, lines.get(min.ix).substring(0, min.iy));
+            lines.set(max.ix, lines.get(max.ix).substring(max.iy));
+
+            for (int line = min.ix + 1; line < max.ix; line++) {
+                lines.remove(min.ix+1);
+            }
+
+        }
+        else if (max.ix - min.ix > 0)
+        {
+            lines.set(min.ix, lines.get(min.ix).substring(0, min.iy));
+            lines.set(max.ix, lines.get(max.ix).substring(max.iy));
+        }
+        else
+        {
+           lines.set(min.ix, lines.get(min.ix).substring(0, min.iy) + lines.get(min.ix).substring(max.iy));
+        }
+
+        line_count = lines.size();
+
+        line_position = min.iy-1;
+        line_pointer = min.ix;
+
+
+        stop_selecting();
     }
 
 
@@ -441,6 +587,12 @@ public class Textbox2D extends Interactable {
 
                 selection_start.translate(0, 0);
                 selection_end.translate(line_count-1, lines.get(line_count-1).length());
+
+                break;
+
+            case KEY_C:
+                if (is_selecting())
+                    Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(get_selection()), null);
 
                 break;
         }
@@ -514,6 +666,9 @@ public class Textbox2D extends Interactable {
     public @Override void onMousePress(int mx, int my, int btn) {
         if ((setSelected(dimension.intersects(mx, my))) && btn == 0)
         {
+
+            vec2 cur = new vec2(line_position, line_pointer);
+
             int line_nr_offset = show_line_numbers ? 40 : 0;
 
             vec2 difference = new vec2(
@@ -530,9 +685,18 @@ public class Textbox2D extends Interactable {
             this.line_position = y_index;
             this.line_pointer = x_index;
 
-        }
+            if (shiftDown())
+            {
+                selection_start.translate(cur.x, cur.y);
+                selection_end.translate(line_position, line_pointer);
+            }
+            else
+            {
+                stop_selecting();
+            }
 
-        System.out.println(selection_start + ", " + selection_end);
+
+        }
 
 
     }
@@ -608,7 +772,7 @@ public class Textbox2D extends Interactable {
         return selected;
     }
 
-    public void setTextHighlighting(TextHighlighting highlighting) { this.text_highlighting = highlighting; }
+    public void setTextHighlighting(ITextHighlighting highlighting) { this.text_highlighting = highlighting; }
 
     public @Override int unique_id() {
         return 0x01F;
